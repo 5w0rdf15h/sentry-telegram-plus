@@ -23,16 +23,16 @@ setup(
     name='sentry_telegram_plus',
     version=__version__,
     packages=['sentry_telegram_plus'],
-    url='https://github.com/butorov/sentry-telegram',
-    author='Viacheslav Butorov, updated by Boris Savinov',
-    author_email='butorovv@gmail.com',
+    url='https://gitlab.hellodoc.team/hellodoc/sentry-telegram-plus',
+    author='Boris Savinov',
+    author_email='bsavinov@hellodoc.team',
     description='Plugin for Sentry which allows sending notification via Telegram messenger.',
     long_description=long_description,
     long_description_content_type='text/markdown',
     license='MIT',
     entry_points={
-        'sentry.integrations': [
-            'telegram_routing_plus = sentry_telegram_plus.integration:TelegramRoutingIntegrationProvider',
+        'sentry.plugins': [
+            'sentry_telegram_plus = sentry_telegram_plus.plugin:TelegramNotificationsPlugin',
         ],
     },
     classifiers=[
