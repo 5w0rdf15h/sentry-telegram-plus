@@ -1,7 +1,8 @@
-# coding: utf-8
 """
-Plugin for Sentry which allows sending notification via Telegram messenger.
+Sentry интеграция (плагин) для перенаправления евентов в различные телеграм каналы, в зависимости от
+различных правил.
 """
 
+__version__ = '0.6.1'
 
-__version__ = '0.6.0'
+from .integration import TelegramRoutingIntegration
