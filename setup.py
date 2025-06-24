@@ -25,6 +25,9 @@ setup(
             'sentry_telegram_plus = sentry_telegram_plus.plugin:TelegramNotificationsPlugin',
         ],
     },
+    install_requires=[
+        "Django>=3.2",
+    ],
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Environment :: Console',
