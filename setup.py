@@ -1,8 +1,18 @@
 #!/usr/bin/env python
 # coding: utf-8
-from setuptools import setup
+from setuptools import setup, find_packages
+import os
+import re
 
-from sentry_telegram_plus import __version__
+def get_version():
+    with open(os.path.join(os.path.dirname(__file__), 'sentry_telegram_plus', '__init__.py'), 'r') as f:
+        for line in f:
+            if line.startswith('__version__'):
+                version = re.search(r'__version__\s*=\s*[\'"]([^\'"]*)[\'"]', line).group(1)
+                return version
+    raise RuntimeError("Unable to find __version__ string.")
+
+__version__ = get_version()
 
 
 with open('README.md', 'r') as f:
@@ -14,7 +24,7 @@ setup(
     version=__version__,
     packages=['sentry_telegram_plus'],
     url='https://github.com/butorov/sentry-telegram',
-    author='Viacheslav Butorov',
+    author='Viacheslav Butorov, updated by Boris Savinov',
     author_email='butorovv@gmail.com',
     description='Plugin for Sentry which allows sending notification via Telegram messenger.',
     long_description=long_description,
