@@ -6,7 +6,10 @@ from collections import defaultdict
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
-from sentry.integrations.base import Integration, IntegrationConfig, IntegrationFeatures
+from sentry.integrations.models.integration import Integration 
+from sentry.integrations.base import IntegrationFeatures, IntegrationProvider
+from sentry.integrations.base import IntegrationConfig
+
 from sentry.integrations.notifications import NotificationConfigurationProvider
 from sentry.integrations.settings import IntegrationOption  # Для полей конфигурации
 from sentry.utils.safe import safe_execute
