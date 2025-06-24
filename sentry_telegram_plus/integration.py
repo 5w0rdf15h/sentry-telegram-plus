@@ -6,9 +6,8 @@ from collections import defaultdict
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
-from sentry.integrations.models.integration import Integration 
+from sentry.integrations.models.integration import Integration
 from sentry.integrations.base import IntegrationFeatures, IntegrationProvider
-from sentry.integrations.base import IntegrationConfig
 
 from sentry.integrations.notifications import NotificationConfigurationProvider
 from sentry.integrations.settings import IntegrationOption  # Для полей конфигурации
@@ -28,7 +27,7 @@ logger = logging.getLogger('sentry.integrations.telegram_routing')  # Испол
 # --- 1. Класс конфигурации интеграции ---
 # Этот класс определяет поля, которые будут доступны пользователю для настройки интеграции.
 # Это аналог вашей старой TelegramNotificationsOptionsForm, но для интеграций.
-class TelegramRoutingIntegrationConfig(IntegrationConfig):
+class TelegramRoutingIntegrationConfig(forms.Form):
     api_origin = forms.CharField(
         label=_('Telegram API origin'),
         widget=forms.TextInput(attrs={'placeholder': 'https://api.telegram.org'}),
