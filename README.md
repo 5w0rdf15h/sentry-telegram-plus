@@ -39,7 +39,7 @@ Table of compatibility:
 | 0.1.1          | 8.x                        | 8.9.0                                               |
 
 
-# Installation
+# Установка
 
 > [!TIP]
 > You can initiate the plugin installation both before and after setting up a Sentry instance.
