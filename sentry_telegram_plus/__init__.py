@@ -5,4 +5,4 @@ Sentry интеграция (плагин) для перенаправления
 
 __version__ = '0.6.1'
 
-from .integration import TelegramRoutingIntegration
+from .integration import TelegramRoutingIntegration, TelegramRoutingIntegrationProvider # noqa

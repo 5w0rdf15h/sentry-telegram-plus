@@ -31,8 +31,8 @@ setup(
     long_description_content_type='text/markdown',
     license='MIT',
     entry_points={
-        'sentry.plugins': [
-            'sentry_telegram_plus = sentry_telegram_plus.plugin:TelegramNotificationsPlugin',
+        'sentry.integrations': [
+            'telegram_routing_plus = sentry_telegram_plus.integration:TelegramRoutingIntegrationProvider',
         ],
     },
     classifiers=[
