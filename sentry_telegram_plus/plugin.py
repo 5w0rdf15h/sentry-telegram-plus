@@ -3,6 +3,7 @@ import re
 import json
 import logging
 from collections import defaultdict
+from typing import List
 
 from django import forms
 from django.utils.translation import gettext_lazy as _
@@ -147,12 +148,12 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
     def get_message_template(self, project):
         return self.get_option('message_template', project)
 
-    def get_receivers_list(self, receivers_str) -> list[list[str, str]]:
+    def get_receivers_list(self, receivers_str) -> List[List[str, str]]:
         if not receivers_str:
             return []
         return list([part.strip().split('/', maxsplit=1) for part in receivers_str.split(';') if part.strip()])
 
-    def send_message(self, url, payload, receiver: list[str, str]):
+    def send_message(self, url, payload, receiver: List[str, str]):
         payload['chat_id'] = receiver[0]
         if len(receiver) > 1:
             payload['message_thread_id'] = receiver[1]
