@@ -1,10 +1,6 @@
-# Sentry Telegram ![Build Status](https://travis-ci.org/butorov/sentry-telegram.svg?branch=master) ![Coverage Status](https://codecov.io/gh/butorov/sentry-telegram/branch/master/graph/badge.svg) ![PyPI](https://badge.fury.io/py/sentry-telegram.svg) ![PyPI - Downloads](https://img.shields.io/pypi/dm/sentry-telegram)
+# Sentry Telegram Plus
 
-Plugin for Sentry which allows sending notifications via the [Telegram](https://telegram.org/) messenger.
-
-As any plugins installation is only available for [self-hosted Sentry](https://github.com/getsentry/self-hosted) instances, this plugin is unavailable for cloud-hosted [Sentry](https://sentry.io/).
-
-The plugin has been tested with the most recent version of Sentry available at the time - 24.5.1.
+Расширенная версия плагина для Telegram уведомлений
 
 # Features
 

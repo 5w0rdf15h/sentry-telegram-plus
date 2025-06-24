@@ -1,4 +1,6 @@
 # coding: utf-8
+import re
+import json
 import logging
 from collections import defaultdict
 
@@ -22,22 +24,18 @@ class TelegramNotificationsOptionsForm(notify.NotificationConfigurationForm):
         widget=forms.TextInput(attrs={'placeholder': 'https://api.telegram.org'}),
         initial='https://api.telegram.org'
     )
-    api_token = forms.CharField(
-        label=_('BotAPI token'),
-        widget=forms.TextInput(attrs={'placeholder': '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11'}),
-        help_text=_('Read more: https://core.telegram.org/bots/api#authorizing-your-bot'),
+    channels_config_json = forms.CharField(
+        label=_('Channels Configuration (JSON)'),
+        widget=forms.Textarea(attrs={'class': 'span10', 'rows': 15}),
+        help_text=_(
+            'JSON configuration for routing messages to different channels. '
+            'Example: {"channels": [{"api_token": "...", "receivers": "...", "template": "", "filters": [...]}]}')
     )
-    receivers = forms.CharField(
-        label=_('Receivers'),
-        widget=forms.Textarea(attrs={'class': 'span6'}),
-        help_text=_('Enter receivers IDs (one per line). Personal messages, group chats and channels also available. '
-                    'If you want to specify a thread ID, separate it with "/" (e.g. "12345/12").'),
-    )
-    message_template = forms.CharField(
-        label=_('Message template'),
+    default_message_template = forms.CharField(
+        label=_('Default Message Template'),
         widget=forms.Textarea(attrs={'class': 'span4'}),
         help_text=_('Set in standard python\'s {}-format convention, available names are: '
-                    '{project_name}, {url}, {title}, {message}, {tag[%your_tag%]}'),
+                    '{project_name}, {url}, {title}, {message}, {tag[%your_tag%]}. Used if channel template is empty.'),
         initial='*[Sentry]* {project_name} {tag[level]}: *{title}*\n```\n{message}```\n{url}'
     )
 
@@ -47,10 +45,10 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
     slug = 'sentry_telegram'
     description = package_doc
     version = __version__
-    author = 'Viacheslav Butorov'
-    author_url = 'https://github.com/butorov/sentry-telegram'
+    author = 'Boris Savinov'
+    author_url = 'https://gitlab.hellodoc.team/hellodoc/sentry-telegram-plus'
     resource_links = [
-        ('Bug Tracker', 'https://github.com/butorov/sentry-telegram/issues'),
+        ('Original version', 'https://github.com/butorov/sentry-telegram'),
         ('Source', 'https://github.com/butorov/sentry-telegram'),
     ]
 
@@ -62,7 +60,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
     logger = logging.getLogger('sentry.plugins.sentry_telegram')
 
     def is_configured(self, project, **kwargs):
-        return bool(self.get_option('api_token', project) and self.get_option('receivers', project))
+        return bool(self.get_option('api_origin', project) and self.get_option('channels_config_json', project))
 
     def get_config(self, project, **kwargs):
         return [
@@ -76,26 +74,20 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
                 'default': 'https://api.telegram.org'
             },
             {
-                'name': 'api_token',
-                'label': 'BotAPI token',
-                'type': 'text',
-                'help': 'Read more: https://core.telegram.org/bots/api#authorizing-your-bot',
-                'placeholder': '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11',
-                'validators': [],
-                'required': True,
-            },
-            {
-                'name': 'receivers',
-                'label': 'Receivers',
+                'name': 'channels_config_json',
+                'label': 'Channels Configuration (JSON)',
                 'type': 'textarea',
-                'help': 'Enter receivers IDs (one per line). Personal messages, group chats and channels also available. '
-                        'If you want to specify a thread ID, separate it with "/" (e.g. "12345/12").',
+                'help': 'JSON configuration for routing messages to different channels. '
+                        'Example: {"api_origin": "https://api.telegram.org", '
+                        '"channels": [{"api_token": "...", "receivers": "-123456789;2", "template": "", '
+                        '"filters": [{"type":"regex__message", "value": "*"}, '
+                        '{"type":"value__tag", "value": "pharma"}]}]}',
                 'validators': [],
                 'required': True,
             },
             {
-                'name': 'message_template',
-                'label': 'Message Template',
+                'name': 'default_message_template',
+                'label': 'Default Message Template',
                 'type': 'textarea',
                 'help': 'Set in standard python\'s {}-format convention, available names are: '
                         '{project_name}, {url}, {title}, {message}, {tag[%your_tag%]}. Undefined tags will be shown as [NA]',
@@ -128,7 +120,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
 
         return message_text
 
-    def build_message(self, group, event):
+    def build_message(self, group, event, message_template):
         event_tags = defaultdict(lambda: '[NA]')
         event_tags.update({k: v for k, v in event.tags})
 
@@ -139,7 +131,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             'url': group.get_absolute_url(),
         }
         text = self.compile_message_text(
-            self.get_message_template(group.project),
+            message_template,
             message_params,
             event.message,
         )
@@ -149,17 +141,16 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             'parse_mode': 'Markdown',
         }
 
-    def build_url(self, project):
-        return '%s/bot%s/sendMessage' % (self.get_option('api_origin', project), self.get_option('api_token', project))
+    def build_url(self, api_origin, api_token):
+        return '%s/bot%s/sendMessage' % (api_origin, api_token)
 
     def get_message_template(self, project):
         return self.get_option('message_template', project)
 
-    def get_receivers(self, project) -> list[list[str, str]]:
-        receivers = self.get_option('receivers', project).strip()
-        if not receivers:
+    def get_receivers_list(self, receivers_str) -> list[list[str, str]]:
+        if not receivers_str:
             return []
-        return list([line.strip().split('/', maxsplit=1) for line in receivers.splitlines() if line.strip()])
+        return list([part.strip().split('/', maxsplit=1) for part in receivers_str.split(';') if part.strip()])
 
     def send_message(self, url, payload, receiver: list[str, str]):
         payload['chat_id'] = receiver[0]
@@ -175,13 +166,78 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
         if response.status_code > 299:
             raise ConnectionError(response.content)
 
+    def _match_filter(self, event, filter_type, filter_value):
+        if filter_type == "regex__message":
+            return re.search(filter_value, event.message)
+        elif filter_type == "value__tag":
+            for tag_key, tag_value in event.tags:
+                if tag_value == filter_value:
+                    return True
+            return False
+        return False
+
+    def _get_channels_config(self, project):
+        try:
+            config_json = self.get_option('channels_config_json', project)
+            if config_json:
+                config = json.loads(config_json)
+                return config.get('channels', []), config.get('api_origin', self.get_option('api_origin', project))
+        except json.JSONDecodeError:
+            self.logger.error("Invalid JSON in channels_config_json for project %s", project.slug)
+        return [], self.get_option('api_origin', project)
+
     def notify_users(self, group, event, fail_silently=False, **kwargs):
         self.logger.debug('Received notification for event: %s' % event)
-        receivers = self.get_receivers(group.project)
-        self.logger.debug('for receivers: %s' % ', '.join(['/'.join(item) for item in receivers] or ()))
-        payload = self.build_message(group, event)
-        self.logger.debug('Built payload: %s' % payload)
-        url = self.build_url(group.project)
-        self.logger.debug('Built url: %s' % url)
-        for receiver in receivers:
-            safe_execute(self.send_message, url, payload, receiver)
+
+        channels_config, global_api_origin = self._get_channels_config(group.project)
+        default_template = self.get_option('default_message_template', group.project)
+
+        matched_channel = None
+        for channel in channels_config:
+            filters = channel.get('filters', [])
+            if not filters:
+                continue
+
+            all_filters_match = True
+            for f in filters:
+                filter_type = f.get('type')
+                filter_value = f.get('value')
+                if not self._match_filter(event, filter_type, filter_value):
+                    all_filters_match = False
+                    break
+
+            if all_filters_match:
+                matched_channel = channel
+                break
+
+        if not matched_channel:
+            for channel in channels_config:
+                if not channel.get('filters'):
+                    matched_channel = channel
+                    break
+
+        if matched_channel:
+            api_token = matched_channel.get('api_token')
+            receivers_str = matched_channel.get('receivers')
+            channel_template = matched_channel.get('template') or default_template
+            api_origin = matched_channel.get('api_origin', global_api_origin)
+
+            if not api_token or not receivers_str:
+                self.logger.warning(
+                    f"Matched channel is missing api_token or receivers for project {group.project.slug}"
+                )
+                return
+
+            receivers = self.get_receivers_list(receivers_str)
+            self.logger.debug('for receivers: %s' % ', '.join(['/'.join(item) for item in receivers] or ()))
+
+            payload = self.build_message(group, event, channel_template)
+            self.logger.debug('Built payload: %s' % payload)
+
+            url = self.build_url(api_origin, api_token)
+            self.logger.debug('Built url: %s' % url)
+
+            for receiver in receivers:
+                safe_execute(self.send_message, url, payload, receiver,_with_transaction=False)
+        else:
+            self.logger.info("No matching channel found for event in project %s. Event not sent.", group.project.slug)
