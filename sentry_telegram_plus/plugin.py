@@ -3,7 +3,7 @@ import json
 import logging
 import re
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, TypedDict, Union
+from typing import Any, Dict, List, Optional, TypedDict, Union, Tuple
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -266,7 +266,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
         logger.warning(f"Не поддерживаемый тип фильтра: {filter_type}")
         return False
 
-    def _get_channels_config_data(self, project) -> tuple[List[ChannelConfig], str]:
+    def _get_channels_config_data(self, project) -> Tuple[List[ChannelConfig], str]:
         """Получает и парсит конфигурацию каналов из настроек проекта."""
         try:
             config_json = self.get_option("channels_config_json", project)
