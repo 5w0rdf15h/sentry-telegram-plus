@@ -144,7 +144,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
     resource_links = [
         ("Original version", "https://github.com/butorov/sentry-telegram"),
         (
-            "Source",
+            "Hello, Doc Repo",
             "https://gitlab.hellodoc.team/hellodoc/sentry-telegram-plus",
         ),
     ]
@@ -156,13 +156,50 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
 
     def is_configured(self, project, **kwargs) -> bool:
         """Проверяет, настроен ли плагин для проекта."""
-        return bool(
-            self.get_option("api_origin", project)
-            and self.get_option("channels_config_json", project)
-        )
+        return bool(self.get_option('api_origin', project) and self.get_option('channels_config_json', project))
 
     def get_config(self, project, **kwargs) -> List[Dict[str, Any]]:
-        return self.project_conf_form(project=project).as_fields()
+        """
+        Возвращает конфигурацию полей для UI Sentry.
+        Этот метод используется Sentry для динамического построения формы.
+        """
+        # Revert to the manual definition, as project_conf_form(project=project) causes TypeError
+        return [
+            {
+                'name': 'api_origin',
+                'label': _('Telegram API origin'),
+                'type': 'text',
+                'placeholder': 'https://api.telegram.org',
+                'validators': [],  # Validators defined in form clean methods
+                'required': True,
+                'default': 'https://api.telegram.org',
+                'help': _('The base URL for the Telegram Bot API. Defaults to https://api.telegram.org.')
+            },
+            {
+                'name': 'channels_config_json',
+                'label': _('Channels Configuration (JSON)'),
+                'type': 'textarea',
+                'help': _(
+                    'JSON configuration for routing messages to different channels. '
+                    'Each channel can have its own API token, receivers, message template, and filters. '
+                    'If no filters are specified for a channel, it acts as a default fallback. '
+                    'Example: <pre>{&quot;api_origin&quot;: &quot;https://api.telegram.org&quot;, &quot;channels&quot;: [{&quot;api_token&quot;: &quot;YOUR_BOT_TOKEN&quot;, &quot;receivers&quot;: &quot;-123456789;2&quot;, &quot;template&quot;: &quot;&quot;, &quot;filters&quot;: [{&quot;type&quot;:&quot;regex__message&quot;, &quot;value&quot;: &quot;.*error.*&quot;}]}]}</pre>'
+                ),
+                'validators': [],
+                'required': True,
+            },
+            {
+                'name': 'default_message_template',
+                'label': _('Default Message Template'),
+                'type': 'textarea',
+                'help': _('Set in standard Python\'s {}-format convention. '
+                              'Available names are: {project_name}, {url}, {title}, {message}, {tag[%your_tag%]}. '
+                              'Undefined tags will be shown as [NA]. This template is used if a specific channel template is empty.'),
+                'validators': [],
+                'required': True,
+                'default': '*[Sentry]* {project_name} {tag[level]}: *{title}*\n```\n{message}```\n{url}'
+            },
+        ]
 
     def compile_message_text(
         self, message_template: str, message_params: Dict[str, Any], event_message: str
