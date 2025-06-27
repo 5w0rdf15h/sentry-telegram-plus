@@ -163,7 +163,6 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
         Возвращает конфигурацию полей для UI Sentry.
         Этот метод используется Sentry для динамического построения формы.
         """
-        # Revert to the manual definition, as project_conf_form(project=project) causes TypeError
         return [
             {
                 'name': 'api_origin',
