@@ -83,12 +83,7 @@ class TelegramNotificationsOptionsForm(notify.NotificationConfigurationForm):
 
     def clean_channels_config_json(self):
         config_json = self.cleaned_data["channels_config_json"]
-
-        # Шаг 1: Попытка распарсить JSON.
-        # Если JSON невалиден (например, из-за лишних символов вне JSON-структуры),
-        # json.loads() выбросит JSONDecodeError.
         try:
-            # Используем strip() чтобы убрать пробелы, но не случайные символы
             config: ChannelsConfigJson = json.loads(config_json.strip())
         except json.JSONDecodeError as e:
             raise ValidationError(
@@ -244,6 +239,13 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             "tag": event_tags,
             "project_name": group.project.name,
             "url": group.get_absolute_url(),
+            "short_id": group.short_id,  # Короткий ID проблемы
+            "level": event.level,  # Уровень события (error, warning и т.д.)
+            "times_seen": group.times_seen,  # Количество раз, сколько проблема произошла
+            "platform": event.platform or "[NA]",  # Платформа
+            "event_datetime": event.datetime or "[NA]", # Время события
+            "os": event.contexts.get('os', {}).get('name'), # ОС
+            "device": event.contexts.get('device', {}).get('name'), # Устройство
         }
         text = self.compile_message_text(
             message_template,
