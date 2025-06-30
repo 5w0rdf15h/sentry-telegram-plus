@@ -240,7 +240,6 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             "project_name": group.project.name,
             "url": group.get_absolute_url(),
             "short_id": group.short_id,  # Короткий ID проблемы
-            "level": event.level,  # Уровень события (error, warning и т.д.)
             "times_seen": group.times_seen,  # Количество раз, сколько проблема произошла
             "platform": event.platform or "[NA]",  # Платформа
             "event_datetime": event.datetime or "[NA]", # Время события
