@@ -161,7 +161,6 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
     def get_config(self, project, **kwargs) -> List[Dict[str, Any]]:
         """
         Возвращает конфигурацию полей для UI Sentry.
-        Этот метод используется Sentry для динамического построения формы.
         """
         return [
             {
@@ -169,7 +168,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
                 'label': _('Telegram API origin'),
                 'type': 'text',
                 'placeholder': 'https://api.telegram.org',
-                'validators': [],  # Validators defined in form clean methods
+                'validators': [],
                 'required': True,
                 'default': 'https://api.telegram.org',
                 'help': _('The base URL for the Telegram Bot API. Defaults to https://api.telegram.org.')
@@ -303,24 +302,24 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
         return False
 
     def _get_channels_config_data(self, project) -> Tuple[List[ChannelConfig], str]:
-        """Получает и парсит конфигурацию каналов из настроек проекта."""
-        try:
-            config_json = self.get_option("channels_config_json", project)
-            if config_json:
-                config: ChannelsConfigJson = json.loads(config_json)
-                return config.get("channels", []), config.get(
-                    "api_origin", self.get_option("api_origin", project)
-                )
-        except json.JSONDecodeError:
-            logger.error(
-                "Invalid JSON in channels_config_json for project %s during runtime, this should have been caught by form validation.",
-                project.slug,
-            )
-        except Exception as e:
-            logger.error(
-                f"Unexpected error loading channels config for project {project.slug}: {e}",
-                exc_info=True,
-            )
+        # """Получает и парсит конфигурацию каналов из настроек проекта."""
+        # try:
+        #     config_json = self.get_option("channels_config_json", project)
+        #     if config_json:
+        #         config: ChannelsConfigJson = json.loads(config_json)
+        #         return config.get("channels", []), config.get(
+        #             "api_origin", self.get_option("api_origin", project)
+        #         )
+        # except json.JSONDecodeError:
+        #     logger.error(
+        #         "Invalid JSON in channels_config_json for project %s during runtime, this should have been caught by form validation.",
+        #         project.slug,
+        #     )
+        # except Exception as e:
+        #     logger.error(
+        #         f"Unexpected error loading channels config for project {project.slug}: {e}",
+        #         exc_info=True,
+        #     )
 
         return [], self.get_option("api_origin", project)
 
