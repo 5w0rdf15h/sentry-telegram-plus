@@ -191,8 +191,8 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
                 'label': _('Default Message Template'),
                 'type': 'textarea',
                 'help': _('Set in standard Python\'s {}-format convention. '
-                              'Available names are: {project_name}, {url}, {title}, {message}, {tag[%your_tag%]}. '
-                              'Undefined tags will be shown as [NA]. This template is used if a specific channel template is empty.'),
+                          'Available names are: {project_name}, {url}, {title}, {message}, {tag[%your_tag%]}. '
+                          'Undefined tags will be shown as [NA]. This template is used if a specific channel template is empty.'),
                 'validators': [],
                 'required': True,
                 'default': '*[Sentry]* {project_name} {tag[level]}: *{title}*\n```\n{message}```\n{url}'
@@ -200,7 +200,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
         ]
 
     def compile_message_text(
-        self, message_template: str, message_params: Dict[str, Any], event_message: str
+            self, message_template: str, message_params: Dict[str, Any], event_message: str
     ) -> str:
         """
         Собирает текст сообщения из шаблона и данных события, усекая его, если необходимо.
@@ -302,60 +302,30 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
         return False
 
     def _get_channels_config_data(self, project) -> Tuple[List[ChannelConfig], str]:
-        # """Получает и парсит конфигурацию каналов из настроек проекта."""
-        # try:
-        #     config_json = self.get_option("channels_config_json", project)
-        #     if config_json:
-        #         config: ChannelsConfigJson = json.loads(config_json)
-        #         return config.get("channels", []), config.get(
-        #             "api_origin", self.get_option("api_origin", project)
-        #         )
-        # except json.JSONDecodeError:
-        #     logger.error(
-        #         "Invalid JSON in channels_config_json for project %s during runtime, this should have been caught by form validation.",
-        #         project.slug,
-        #     )
-        # except Exception as e:
-        #     logger.error(
-        #         f"Unexpected error loading channels config for project {project.slug}: {e}",
-        #         exc_info=True,
-        #     )
+        """Получает и парсит конфигурацию каналов из настроек проекта."""
+        try:
+            config_json = self.get_option("channels_config_json", project)
+            if config_json:
+                config: ChannelsConfigJson = json.loads(config_json)
+                return config.get("channels", []), config.get(
+                    "api_origin", self.get_option("api_origin", project)
+                )
+        except json.JSONDecodeError:
+            logger.error(
+                "Invalid JSON in channels_config_json for project %s during runtime, this should have been caught by form validation.",
+                project.slug,
+            )
+        except Exception as e:
+            logger.error(
+                f"Unexpected error loading channels config for project {project.slug}: {e}",
+                exc_info=True,
+            )
 
         return [], self.get_option("api_origin", project)
 
-    def _find_matching_channel(
-        self, event: Any, channels_config: List[ChannelConfig]
-    ) -> Optional[ChannelConfig]:
-        """Находит первый канал, соответствующий фильтрам события, или дефолтный канал без фильтров."""
-        matched_channel = None
-        default_channel = None
-
-        for channel in channels_config:
-            filters = channel.get("filters", [])
-            if not filters:
-                default_channel = channel
-                continue
-
-            all_filters_match = True
-            for f in filters:
-                filter_type = f.get("type")
-                filter_value = f.get("value")
-                if (
-                    not filter_type
-                    or not filter_value
-                    or not self._match_filter(event, filter_type, filter_value)
-                ):
-                    all_filters_match = False
-                    break
-
-            if all_filters_match:
-                matched_channel = channel
-                break
-
-        return matched_channel or default_channel
 
     def notify_users(self, group, event, fail_silently=False, **kwargs) -> None:
-        """Основной метод для отправки уведомлений."""
+        """Отправка уведомлений."""
         logger.debug("Received notification for event: %s" % event)
 
         channels_config, global_api_origin = self._get_channels_config_data(
@@ -370,45 +340,73 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             )
             return
 
-        matched_channel = self._find_matching_channel(event, channels_config)
+        matching_channels: List[ChannelConfig] = []
+        default_channel: Optional[ChannelConfig] = None
 
-        if not matched_channel:
+        for channel_config in channels_config:
+            filters = channel_config.get("filters", [])
+
+            if not filters:
+                default_channel = channel_config
+                continue
+
+            all_filters_match = True
+            for f in filters:
+                filter_type = f.get("type")
+                filter_value = f.get("value")
+                if (
+                        not filter_type
+                        or not filter_value
+                        or not self._match_filter(event, filter_type, filter_value)
+                ):
+                    all_filters_match = False
+                    break
+
+            if all_filters_match:
+                matching_channels.append(channel_config)
+
+        if not matching_channels and default_channel:
+            matching_channels.append(default_channel)
+
+        if not matching_channels:
             logger.info(
-                "No matching channel or default channel found for event in project %s. Event not sent.",
+                "No matching channels or default channel found for event in project %s. Event not sent.",
                 group.project.slug,
             )
             return
 
-        api_token = matched_channel.get("api_token")
-        receivers_str = matched_channel.get("receivers")
-        channel_template = matched_channel.get("template") or default_template
-        api_origin = matched_channel.get("api_origin", global_api_origin)
+        for channel_to_send in matching_channels:
+            api_token = channel_to_send.get("api_token")
+            receivers_str = channel_to_send.get("receivers")
+            channel_template = channel_to_send.get("template") or default_template
+            api_origin = channel_to_send.get("api_origin", global_api_origin)
 
-        if not api_token or not receivers_str:
-            logger.warning(
-                f"Matched channel is missing api_token or receivers for project {group.project.slug}. Notification skipped."
+            if not api_token or not receivers_str:
+                logger.warning(
+                    f"Channel missing api_token or receivers for project {group.project.slug}. Notification skipped for this channel."
+                )
+                continue
+
+            receivers = self.get_receivers_list(receivers_str)
+            if not receivers:
+                logger.warning(
+                    f"No valid receivers parsed for channel {receivers_str} in project {group.project.slug}. Notification skipped for this channel."
+                )
+                continue
+
+            logger.debug(
+                "Sending to receivers: %s for channel %s"
+                % (", ".join(["/".join(item) for item in receivers] or ()), receivers_str)
             )
-            return
 
-        receivers = self.get_receivers_list(receivers_str)
-        if not receivers:
-            logger.warning(
-                f"No valid receivers parsed for matched channel in project {group.project.slug}. Notification skipped."
-            )
-            return
+            payload = self.build_message(group, event, channel_template)
+            logger.debug(
+                "Built payload for channel %s: %s" % (receivers_str, payload))
 
-        logger.debug(
-            "for receivers: %s"
-            % ", ".join(["/".join(item) for item in receivers] or ())
-        )
+            url = self.build_url(api_origin, api_token)
+            logger.debug("Built URL for channel %s: %s" % (receivers_str, url))
 
-        payload = self.build_message(group, event, channel_template)
-        logger.debug("Built payload: %s" % payload)
-
-        url = self.build_url(api_origin, api_token)
-        logger.debug("Built url: %s" % url)
-
-        for receiver in receivers:
-            safe_execute(
-                self.send_message, url, payload, receiver, _with_transaction=False
-            )
+            for receiver in receivers:
+                safe_execute(
+                    self.send_message, url, payload, receiver, _with_transaction=False
+                )
