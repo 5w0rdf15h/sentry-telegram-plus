@@ -83,6 +83,7 @@ class TelegramNotificationsOptionsForm(notify.NotificationConfigurationForm):
 
     def clean_channels_config_json(self):
         config_json = self.cleaned_data["channels_config_json"]
+        logger.debug("clean_channels_config_json %s" % self.cleaned_data["channels_config_json"])
         try:
             config: ChannelsConfigJson = json.loads(config_json.strip())
         except json.JSONDecodeError as e:
