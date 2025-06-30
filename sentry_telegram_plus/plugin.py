@@ -243,8 +243,6 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             "times_seen": group.times_seen,  # Количество раз, сколько проблема произошла
             "platform": event.platform or "[NA]",  # Платформа
             "event_datetime": event.datetime or "[NA]", # Время события
-            "os": event.contexts.get('os', {}).get('name'), # ОС
-            "device": event.contexts.get('device', {}).get('name'), # Устройство
         }
         text = self.compile_message_text(
             message_template,
