@@ -83,26 +83,45 @@ class TelegramNotificationsOptionsForm(notify.NotificationConfigurationForm):
 
     def clean_channels_config_json(self):
         config_json = self.cleaned_data["channels_config_json"]
+
+        # Шаг 1: Попытка распарсить JSON.
+        # Если JSON невалиден (например, из-за лишних символов вне JSON-структуры),
+        # json.loads() выбросит JSONDecodeError.
         try:
-            config: ChannelsConfigJson = json.loads(config_json)
+            # Используем strip() чтобы убрать пробелы, но не случайные символы
+            config: ChannelsConfigJson = json.loads(config_json.strip())
+        except json.JSONDecodeError as e:
+            raise ValidationError(
+                _("Invalid JSON in Channels Configuration: %s. Please check your syntax thoroughly.")
+                % e
+            )
+        except Exception as e:
+            raise ValidationError(
+                _(f"An unexpected error occurred during JSON parsing: {e}")
+            )
+
+        try:
             if "channels" not in config or not isinstance(config["channels"], list):
                 raise ValidationError(
-                    _(
-                        "Channels configuration must contain a 'channels' key with a list of channel objects."
-                    )
+                    _("Channels configuration must contain a 'channels' key with a list of channel objects.")
                 )
+            if "api_origin" in config and not isinstance(config["api_origin"], str):
+                raise ValidationError(
+                    _("The 'api_origin' in Channels Configuration must be a string.")
+                )
+
             for i, channel in enumerate(config["channels"]):
                 if not isinstance(channel, dict):
                     raise ValidationError(
                         _(f"Channel at index {i} must be a dictionary.")
                     )
-                if "api_token" not in channel or not channel["api_token"]:
+                if "api_token" not in channel or not channel["api_token"] or not isinstance(channel["api_token"], str):
                     raise ValidationError(
-                        _(f"Channel at index {i} must have a non-empty 'api_token'.")
+                        _(f"Channel at index {i} must have a non-empty string 'api_token'.")
                     )
-                if "receivers" not in channel or not channel["receivers"]:
+                if "receivers" not in channel or not channel["receivers"] or not isinstance(channel["receivers"], str):
                     raise ValidationError(
-                        _(f"Channel at index {i} must have a non-empty 'receivers'.")
+                        _(f"Channel at index {i} must have a non-empty string 'receivers'.")
                     )
 
                 filters = channel.get("filters", [])
@@ -117,19 +136,16 @@ class TelegramNotificationsOptionsForm(notify.NotificationConfigurationForm):
                                 f"Filter at channel index {i}, filter index {j} must be a dictionary with 'type' and 'value'."
                             )
                         )
+                    if not isinstance(f["type"], str) or not isinstance(f["value"], str):
+                        raise ValidationError(
+                            _(f"Filter type and value at channel index {i}, filter index {j} must be strings.")
+                        )
 
-        except json.JSONDecodeError as e:
-            raise ValidationError(
-                _(
-                    "Invalid JSON in Channels Configuration: %s. Please check your syntax."
-                )
-                % e
-            )
         except ValidationError as e:
             raise e
         except Exception as e:
             raise ValidationError(
-                _(f"An unexpected error occurred during JSON validation: {e}")
+                _(f"An unexpected error occurred during channels configuration validation: {e}")
             )
         return config_json
 
@@ -360,7 +376,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
                         or not self._match_filter(event, filter_type, filter_value)
                 ):
                     all_filters_match = False
-                    break
+                    break 
 
             if all_filters_match:
                 matching_channels.append(channel_config)
@@ -392,7 +408,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
                 logger.warning(
                     f"No valid receivers parsed for channel {receivers_str} in project {group.project.slug}. Notification skipped for this channel."
                 )
-                continue
+                continue 
 
             logger.debug(
                 "Sending to receivers: %s for channel %s"
@@ -401,7 +417,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
 
             payload = self.build_message(group, event, channel_template)
             logger.debug(
-                "Built payload for channel %s: %s" % (receivers_str, payload))
+                "Built payload for channel %s: %s" % (receivers_str, payload)) 
 
             url = self.build_url(api_origin, api_token)
             logger.debug("Built URL for channel %s: %s" % (receivers_str, url))
