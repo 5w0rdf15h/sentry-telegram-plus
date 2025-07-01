@@ -182,7 +182,6 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             "times_seen": group.times_seen,  # Количество раз, сколько проблема произошла
             "platform": event.platform or "[NA]",  # Платформа
             "event_datetime": event.datetime or "[NA]", # Время события
-            "event_level": event.level
         }
         text = self.compile_message_text(
             message_template,
@@ -253,8 +252,6 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             tag_name = filter_type.split("__", 1)[1]
             tag_value = dict(event.tags).get(tag_name)
             return bool(tag_value and re.search(filter_value, tag_value, re.IGNORECASE))
-        elif filter_type == "level":
-            return event.level == filter_value
         elif filter_type == "project_slug":
             return event.project and event.project.slug == filter_value
         elif filter_type == "value__tag":
