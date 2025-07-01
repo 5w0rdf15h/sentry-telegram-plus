@@ -3,7 +3,8 @@ import json
 import logging
 import re
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, TypedDict, Union, Tuple
+from typing import Any, Dict, List, Optional, TypedDict, Tuple
+from urllib.parse import urlparse
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -11,6 +12,7 @@ from django.utils.translation import gettext_lazy as _
 from sentry.http import safe_urlopen
 from sentry.plugins.bases import notify
 from sentry.utils.safe import safe_execute
+from sentry.utils.strings import truncatechars
 
 from . import __doc__ as package_doc
 from . import __version__
@@ -31,12 +33,12 @@ class ChannelConfig(TypedDict, total=False):
     receivers: str
     template: Optional[str]
     api_origin: Optional[str]
-    filters: List[ChannelFilter]
+    filters: list[ChannelFilter]
 
 
 class ChannelsConfigJson(TypedDict):
     api_origin: Optional[str]
-    channels: List[ChannelConfig]
+    channels: list[ChannelConfig]
 
 
 class TelegramNotificationsOptionsForm(notify.NotificationConfigurationForm):
@@ -80,70 +82,6 @@ class TelegramNotificationsOptionsForm(notify.NotificationConfigurationForm):
                 )
             )
         return value
-
-    def clean_channels_config_json(self):
-        config_json = self.cleaned_data["channels_config_json"]
-        logger.debug("clean_channels_config_json %s" % self.cleaned_data["channels_config_json"])
-        try:
-            config: ChannelsConfigJson = json.loads(config_json.strip())
-        except json.JSONDecodeError as e:
-            raise ValidationError(
-                _("Invalid JSON in Channels Configuration: %s. Please check your syntax thoroughly.")
-                % e
-            )
-        except Exception as e:
-            raise ValidationError(
-                _(f"An unexpected error occurred during JSON parsing: {e}")
-            )
-
-        try:
-            if "channels" not in config or not isinstance(config["channels"], list):
-                raise ValidationError(
-                    _("Channels configuration must contain a 'channels' key with a list of channel objects.")
-                )
-            if "api_origin" in config and not isinstance(config["api_origin"], str):
-                raise ValidationError(
-                    _("The 'api_origin' in Channels Configuration must be a string.")
-                )
-
-            for i, channel in enumerate(config["channels"]):
-                if not isinstance(channel, dict):
-                    raise ValidationError(
-                        _(f"Channel at index {i} must be a dictionary.")
-                    )
-                if "api_token" not in channel or not channel["api_token"] or not isinstance(channel["api_token"], str):
-                    raise ValidationError(
-                        _(f"Channel at index {i} must have a non-empty string 'api_token'.")
-                    )
-                if "receivers" not in channel or not channel["receivers"] or not isinstance(channel["receivers"], str):
-                    raise ValidationError(
-                        _(f"Channel at index {i} must have a non-empty string 'receivers'.")
-                    )
-
-                filters = channel.get("filters", [])
-                if not isinstance(filters, list):
-                    raise ValidationError(
-                        _(f"Filters for channel at index {i} must be a list.")
-                    )
-                for j, f in enumerate(filters):
-                    if not isinstance(f, dict) or "type" not in f or "value" not in f:
-                        raise ValidationError(
-                            _(
-                                f"Filter at channel index {i}, filter index {j} must be a dictionary with 'type' and 'value'."
-                            )
-                        )
-                    if not isinstance(f["type"], str) or not isinstance(f["value"], str):
-                        raise ValidationError(
-                            _(f"Filter type and value at channel index {i}, filter index {j} must be strings.")
-                        )
-
-        except ValidationError as e:
-            raise e
-        except Exception as e:
-            raise ValidationError(
-                _(f"An unexpected error occurred during channels configuration validation: {e}")
-            )
-        return config_json
 
 
 class TelegramNotificationsPlugin(notify.NotificationPlugin):
@@ -236,7 +174,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
         event_tags.update({k: v for k, v in event.tags})
 
         message_params = {
-            "title": event.title[:EVENT_TITLE_MAX_LENGTH],
+            "title": truncatechars(event.title, EVENT_TITLE_MAX_LENGTH),
             "tag": event_tags,
             "project_name": group.project.name,
             "url": group.get_absolute_url(),
@@ -244,6 +182,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             "times_seen": group.times_seen,  # Количество раз, сколько проблема произошла
             "platform": event.platform or "[NA]",  # Платформа
             "event_datetime": event.datetime or "[NA]", # Время события
+            "event_level": event.level
         }
         text = self.compile_message_text(
             message_template,
@@ -258,6 +197,15 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
 
     def build_url(self, api_origin: str, api_token: str) -> str:
         return f"{api_origin}/bot{api_token}/sendMessage"
+
+    def _mask_url_token(self, url: str) -> str:
+        """Маскирует API токен в URL для логирования."""
+        parsed_url = urlparse(url)
+        path_parts = parsed_url.path.split('/')
+        if len(path_parts) > 2 and path_parts[1] == 'bot':
+            path_parts[2] = '...'  # Заменяем токен на троеточие
+        masked_path = '/'.join(path_parts)
+        return f"{parsed_url.scheme}://{parsed_url.netloc}{masked_path}{'?' + parsed_url.query if parsed_url.query else ''}"
 
     def get_receivers_list(self, receivers_str: str) -> List[List[str]]:
         """Парсит строку получателей в список списков [chat_id, message_thread_id]."""
@@ -310,11 +258,9 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
         elif filter_type == "project_slug":
             return event.project and event.project.slug == filter_value
         elif filter_type == "value__tag":
-            for tag_key, tag_value in event.tags:
-                if tag_value == filter_value:
-                    return True
-            return False
-        logger.warning(f"Не поддерживаемый тип фильтра: {filter_type}")
+            tags_dict = dict(event.tags)
+            return filter_value in tags_dict.values()
+        logger.warning(f"Неподдерживаемый тип фильтра: {filter_type}")
         return False
 
     def _get_channels_config_data(self, project) -> Tuple[List[ChannelConfig], str]:
@@ -420,7 +366,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
                 "Built payload for channel %s: %s" % (receivers_str, payload)) 
 
             url = self.build_url(api_origin, api_token)
-            logger.debug("Built URL for channel %s: %s" % (receivers_str, url))
+            logger.debug("Built URL for channel %s: %s" % (receivers_str, self._mask_url_token(url)))
 
             for receiver in receivers:
                 safe_execute(
