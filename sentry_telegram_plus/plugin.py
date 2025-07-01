@@ -308,6 +308,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
 
             if not filters:
                 default_channel = channel_config
+                matching_channels.append(channel_config)
                 continue
 
             all_filters_match = True
@@ -364,7 +365,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
                 "Built payload for channel %s: %s" % (receivers_str, payload)) 
 
             url = self.build_url(api_origin, api_token)
-            logger.debug("Built URL for channel %s: %s" % (receivers_str, self._mask_url_token(url)))
+            logger.info("Built URL for sending for channel %s: %s" % (receivers_str, self._mask_url_token(url)))
 
             for receiver in receivers:
                 safe_execute(
