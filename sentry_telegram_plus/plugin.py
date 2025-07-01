@@ -141,7 +141,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
                 'label': _('Default Message Template'),
                 'type': 'textarea',
                 'help': _('Set in standard Python\'s {}-format convention. '
-                          'Available names are: {project_name}, {url}, {title}, {message}, {tag[%your_tag%]}. '
+                          'Available names / macroses are: {project_name}, {url}, {title}, {message}, {tag[%your_tag%], short_id, times_seen, platform, event_datetime}. '
                           'Undefined tags will be shown as [NA]. This template is used if a specific channel template is empty.'),
                 'validators': [],
                 'required': True,
