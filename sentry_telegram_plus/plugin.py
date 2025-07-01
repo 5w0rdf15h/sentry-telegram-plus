@@ -156,9 +156,10 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
         Собирает текст сообщения из шаблона и данных события, усекая его, если необходимо.
         """
         truncate_warning_text = "... (truncated)"
-        # Максимальная длина сообщения с учетом предупреждения
+        # Если в настройках задали ключ, которого нет, вернем - вместо ошибки KeyError
+        message_params_for_format = defaultdict(lambda: "-", message_params)
         max_message_body_len = TELEGRAM_MAX_MESSAGE_LENGTH - len(
-            message_template.format(**message_params, message=truncate_warning_text)
+            message_template.format(**message_params_for_format, message=truncate_warning_text)
         )
         if max_message_body_len < 0:
             max_message_body_len = 0
@@ -166,7 +167,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
         if len(event_message) > max_message_body_len:
             event_message = event_message[:max_message_body_len] + truncate_warning_text
 
-        return message_template.format(**message_params, message=event_message)
+        return message_template.format(**message_params_for_format, message=event_message)
 
     def build_message(self, group, event, message_template: str) -> Dict[str, Any]:
         """Создание сообщения для отправки в Telegram."""
