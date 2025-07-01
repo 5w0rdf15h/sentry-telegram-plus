@@ -330,7 +330,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
 
         if not matching_channels:
             logger.info(
-                "No matching channels or default channel found for event in project %s. Event not sent.",
+                "No Telegram channels configured for project %s. Event not sent.",
                 group.project.slug,
             )
             return
