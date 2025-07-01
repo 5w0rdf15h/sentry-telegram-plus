@@ -33,12 +33,12 @@ class ChannelConfig(TypedDict, total=False):
     receivers: str
     template: Optional[str]
     api_origin: Optional[str]
-    filters: list[ChannelFilter]
+    filters: List[ChannelFilter]
 
 
 class ChannelsConfigJson(TypedDict):
     api_origin: Optional[str]
-    channels: list[ChannelConfig]
+    channels: List[ChannelConfig]
 
 
 class TelegramNotificationsOptionsForm(notify.NotificationConfigurationForm):
