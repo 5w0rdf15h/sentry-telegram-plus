@@ -66,7 +66,7 @@ class TelegramNotificationsOptionsForm(notify.NotificationConfigurationForm):
         widget=forms.Textarea(attrs={"class": "span4"}),
         help_text=_(
             "Set in standard Python's {}-format convention. "
-            "Available names are: {project_name}, {url}, {title}, {message}, {tag[%your_tag%]}. "
+            "Available names / macroses are: {project_name}, {url}, {title}, {message}, {tag[%your_tag%], short_id, times_seen, platform, event_datetime}. "
             "Undefined tags will be shown as [NA]. This template is used if a specific channel template is empty."
         ),
         initial="*[Sentry]* {project_name} {tag[level]}: *{title}*\n```\n{message}```\n{url}",
@@ -149,45 +149,87 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             },
         ]
 
+    def _escape_markdown_v1(self, text: str) -> str:
+        """
+        Экранирует специальные символы Markdown v1 для Telegram.
+        Это необходимо, чтобы символы вроде *, _, `, [ отображались буквально,
+        а не как форматирование, если они не предназначены для этого.
+        """
+        # Символы, которые нужно экранировать в Markdown v1
+        # https://core.telegram.org/bots/api#markdown-style
+        special_chars = r'_*`['
+        escaped_text = "".join(['\\' + char if char in special_chars else char for char in text])
+        return escaped_text
+
     def compile_message_text(
             self, message_template: str, message_params: Dict[str, Any], event_message: str
     ) -> str:
         """
-        Собирает текст сообщения из шаблона и данных события, усекая его, если необходимо.
+        Собирает текст сообщения из шаблона и данных события, обрезая его по длине, если необходимо.
         """
         truncate_warning_text = "... (truncated)"
-        # Если в настройках задали ключ, которого нет, вернем - вместо ошибки KeyError
-        message_params_for_format = defaultdict(lambda: "-", message_params)
-        max_message_body_len = TELEGRAM_MAX_MESSAGE_LENGTH - len(
-            message_template.format(**message_params_for_format, message=truncate_warning_text)
-        )
+
+        try:
+            max_message_body_len = TELEGRAM_MAX_MESSAGE_LENGTH - len(
+                message_template.format(**message_params, message=truncate_warning_text)
+            )
+        except KeyError as e:
+            missing_key = str(e).strip("'")
+            logger.warning(
+                f"Missing key '{missing_key}' in message parameters for template. "
+            )
+            temp_message_params = message_params.copy()
+            temp_message_params[missing_key] = "-"
+
+            max_message_body_len = TELEGRAM_MAX_MESSAGE_LENGTH - len(
+                message_template.format(**temp_message_params, message=truncate_warning_text)
+            )
+
         if max_message_body_len < 0:
             max_message_body_len = 0
 
         if len(event_message) > max_message_body_len:
             event_message = event_message[:max_message_body_len] + truncate_warning_text
 
-        return message_template.format(**message_params_for_format, message=event_message)
+        # Повторяем форматирование для окончательного текста
+        try:
+            final_text = message_template.format(**message_params, message=event_message)
+        except KeyError as e:
+            # Снова ловим, если KeyError возникнет при форматировании конечного сообщения
+            missing_key = str(e).strip("'")
+            logger.warning(
+                f"Missing key '{missing_key}' in message parameters for final template. "
+                "Replacing with '-' and retrying final message formatting."
+            )
+            temp_message_params = message_params.copy()
+            temp_message_params[missing_key] = "-"
+            final_text = message_template.format(**temp_message_params, message=event_message)
+
+        return final_text
 
     def build_message(self, group, event, message_template: str) -> Dict[str, Any]:
         """Создание сообщения для отправки в Telegram."""
         event_tags = defaultdict(lambda: "[NA]")
         event_tags.update({k: v for k, v in event.tags})
 
+        escaped_title = self._escape_markdown_v1(truncatechars(event.title, EVENT_TITLE_MAX_LENGTH))
+        escaped_event_message = self._escape_markdown_v1(event.message or "пустое сообщение :(")
+
         message_params = {
-            "title": truncatechars(event.title, EVENT_TITLE_MAX_LENGTH),
+            "title": escaped_title,
             "tag": event_tags,
             "project_name": group.project.name,
             "url": group.get_absolute_url(),
             "short_id": group.short_id,  # Короткий ID проблемы
             "times_seen": group.times_seen,  # Количество раз, сколько проблема произошла
             "platform": event.platform or "[NA]",  # Платформа
-            "event_datetime": event.datetime or "[NA]", # Время события
+            "event_datetime": event.datetime or "[NA]",  # Время события
+            "event_level": event_tags['level'],  # Добавляем 'event_level' для шаблона
         }
         text = self.compile_message_text(
             message_template,
             message_params,
-            event.message or "",
+            escaped_event_message,
         )
 
         return {
@@ -253,6 +295,8 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             tag_name = filter_type.split("__", 1)[1]
             tag_value = dict(event.tags).get(tag_name)
             return bool(tag_value and re.search(filter_value, tag_value, re.IGNORECASE))
+        elif filter_type == "level":
+            return event.level == filter_value
         elif filter_type == "project_slug":
             return event.project and event.project.slug == filter_value
         elif filter_type == "value__tag":
@@ -263,26 +307,84 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
 
     def _get_channels_config_data(self, project) -> Tuple[List[ChannelConfig], str]:
         """Получает и парсит конфигурацию каналов из настроек проекта."""
+        config_json = self.get_option("channels_config_json", project)
+        if not config_json:
+            logger.info(f"channels_config_json is empty for project {project.slug}")
+            return [], self.get_option("api_origin", project)
+
         try:
-            config_json = self.get_option("channels_config_json", project)
-            if config_json:
-                config: ChannelsConfigJson = json.loads(config_json)
-                return config.get("channels", []), config.get(
-                    "api_origin", self.get_option("api_origin", project)
+            config: ChannelsConfigJson = json.loads(config_json)
+
+            if not isinstance(config, dict):
+                logger.error(
+                    f"Channels configuration for project {project.slug} must be a dictionary."
                 )
-        except json.JSONDecodeError:
-            logger.error(
-                "Invalid JSON in channels_config_json for project %s during runtime, this should have been caught by form validation.",
-                project.slug,
+                return [], self.get_option("api_origin", project)
+
+            if "channels" not in config or not isinstance(config["channels"], list):
+                logger.error(
+                    f"Channels configuration for project {project.slug} must contain a 'channels' key with a list of channel objects."
+                )
+                return [], self.get_option("api_origin", project)
+            if "api_origin" in config and not isinstance(config["api_origin"], str):
+                logger.error(
+                    f"The 'api_origin' in Channels Configuration for project {project.slug} must be a string."
+                )
+                return [], self.get_option("api_origin", project)
+
+            return config.get("channels", []), config.get(
+                "api_origin", self.get_option("api_origin", project)
             )
+        except json.JSONDecodeError as e:
+            logger.error(
+                "Invalid JSON in channels_config_json for project %s: %s",
+                project.slug, e, exc_info=True
+            )
+            return [], self.get_option("api_origin", project)
         except Exception as e:
             logger.error(
                 f"Unexpected error loading channels config for project {project.slug}: {e}",
                 exc_info=True,
             )
+            return [], self.get_option("api_origin", project)
 
-        return [], self.get_option("api_origin", project)
+    def _get_matching_channels(self, event: Any, channels_config: List[ChannelConfig]) -> List[ChannelConfig]:
+        """
+        Определяет, какие каналы соответствуют событию на основе их фильтров.
+        Возвращает список подходящих конфигураций каналов.
+        """
+        matching_channels: List[ChannelConfig] = []
+        default_channel: Optional[ChannelConfig] = None
 
+        for channel_config in channels_config:
+            filters = channel_config.get("filters", [])
+
+            if not filters:
+                # Если фильтров нет, это дефолтный канал
+                default_channel = channel_config
+                continue
+
+            all_filters_match = True
+            for f in filters:
+                filter_type = f.get("type")
+                filter_value = f.get("value")
+                if (
+                        not filter_type
+                        or not filter_value
+                        or not self._match_filter(event, filter_type, filter_value)
+                ):
+                    all_filters_match = False
+                    break
+
+            if all_filters_match:
+                matching_channels.append(channel_config)
+
+        # Если не нашлось ни одного канала, соответствующего фильтрам,
+        # и при этом есть дефолтный канал, используем его.
+        if not matching_channels and default_channel:
+            matching_channels.append(default_channel)
+
+        return matching_channels
 
     def notify_users(self, group, event, fail_silently=False, **kwargs) -> None:
         """Отправка уведомлений."""
@@ -300,38 +402,11 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             )
             return
 
-        matching_channels: List[ChannelConfig] = []
-        default_channel: Optional[ChannelConfig] = None
-
-        for channel_config in channels_config:
-            filters = channel_config.get("filters", [])
-
-            if not filters:
-                default_channel = channel_config
-                matching_channels.append(channel_config)
-                continue
-
-            all_filters_match = True
-            for f in filters:
-                filter_type = f.get("type")
-                filter_value = f.get("value")
-                if (
-                        not filter_type
-                        or not filter_value
-                        or not self._match_filter(event, filter_type, filter_value)
-                ):
-                    all_filters_match = False
-                    break 
-
-            if all_filters_match:
-                matching_channels.append(channel_config)
-
-        if not matching_channels and default_channel:
-            matching_channels.append(default_channel)
+        matching_channels = self._get_matching_channels(event, channels_config)
 
         if not matching_channels:
             logger.info(
-                "No Telegram channels configured for project %s. Event not sent.",
+                "No matching channels or default channel found for event in project %s. Event not sent.",
                 group.project.slug,
             )
             return
@@ -353,7 +428,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
                 logger.warning(
                     f"No valid receivers parsed for channel {receivers_str} in project {group.project.slug}. Notification skipped for this channel."
                 )
-                continue 
+                continue
 
             logger.debug(
                 "Sending to receivers: %s for channel %s"
@@ -361,8 +436,6 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             )
 
             payload = self.build_message(group, event, channel_template)
-            logger.debug(
-                "Built payload for channel %s: %s" % (receivers_str, payload)) 
 
             url = self.build_url(api_origin, api_token)
             logger.info("Built URL for sending for channel %s: %s" % (receivers_str, self._mask_url_token(url)))
