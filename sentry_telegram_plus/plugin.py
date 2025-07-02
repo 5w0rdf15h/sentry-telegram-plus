@@ -358,11 +358,8 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
 
         for channel_config in channels_config:
             filters = channel_config.get("filters", [])
-
             if not filters:
-                # Если фильтров нет, это дефолтный канал
-                default_channel = channel_config
-                continue
+                matching_channels.append(channel_config)
 
             all_filters_match = True
             for f in filters:
@@ -376,13 +373,14 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
                     all_filters_match = False
                     break
 
-            if all_filters_match:
+            if all_filters_match and filters:
                 matching_channels.append(channel_config)
 
         # Если не нашлось ни одного канала, соответствующего фильтрам,
         # и при этом есть дефолтный канал, используем его.
         if not matching_channels and default_channel:
             matching_channels.append(default_channel)
+        logger.info(f"_get_matching_channels: {matching_channels}")
 
         return matching_channels
 
