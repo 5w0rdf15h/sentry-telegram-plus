@@ -224,7 +224,7 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
             "times_seen": group.times_seen,  # Количество раз, сколько проблема произошла
             "platform": event.platform or "[NA]",  # Платформа
             "event_datetime": event.datetime or "[NA]",  # Время события
-            "event_level": event_tags['level'],  # Добавляем 'event_level' для шаблона
+            "event_level": event_tags['level'],
         }
         text = self.compile_message_text(
             message_template,
