@@ -3,7 +3,7 @@ import json
 import logging
 import re
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, TypedDict, Tuple
+from typing import Any, Dict, List, Optional, TypedDict, Tuple, Union
 from urllib.parse import urlparse
 
 from django import forms
@@ -27,13 +27,17 @@ class ChannelFilter(TypedDict):
     type: str
     value: str
 
+class FilterGroup(TypedDict, total=False):
+    and_filters: List[Union[ChannelFilter, 'FilterGroup']]
+    or_filters: List[Union[ChannelFilter, 'FilterGroup']]
+
 
 class ChannelConfig(TypedDict, total=False):
     api_token: str
     receivers: str
     template: Optional[str]
     api_origin: Optional[str]
-    filters: List[ChannelFilter]
+    filters: Union[List[ChannelFilter], FilterGroup]
 
 
 class ChannelsConfigJson(TypedDict):
@@ -191,11 +195,9 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
         if len(event_message) > max_message_body_len:
             event_message = event_message[:max_message_body_len] + truncate_warning_text
 
-        # Повторяем форматирование для окончательного текста
         try:
             final_text = message_template.format(**message_params, message=event_message)
         except KeyError as e:
-            # Снова ловим, если KeyError возникнет при форматировании конечного сообщения
             missing_key = str(e).strip("'")
             logger.warning(
                 f"Missing key '{missing_key}' in message parameters for final template. "
@@ -287,23 +289,72 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
 
     def _match_filter(self, event: Any, filter_type: str, filter_value: str) -> bool:
         """Проверяет, соответствует ли событие заданному фильтру."""
+        logger.info(f"_match_filter:\t type='{filter_type}', value='{filter_value}'")
+
         if filter_type == "regex__message":
-            return bool(re.search(filter_value, event.message or "", re.IGNORECASE))
+            message_content = event.message or ""
+            match = bool(re.search(filter_value, message_content, re.IGNORECASE))
+            return match
         elif filter_type == "regex__title":
-            return bool(re.search(filter_value, event.title or "", re.IGNORECASE))
+            title_content = event.title or ""
+            match = bool(re.search(filter_value, title_content, re.IGNORECASE))
+            return match
         elif filter_type.startswith("tag__"):
             tag_name = filter_type.split("__", 1)[1]
             tag_value = dict(event.tags).get(tag_name)
-            return bool(tag_value and re.search(filter_value, tag_value, re.IGNORECASE))
+            match = bool(tag_value and re.search(filter_value, tag_value, re.IGNORECASE))
+            return match
         elif filter_type == "level":
-            return event.level == filter_value
+            match = (event.level == filter_value)
+            return match
         elif filter_type == "project_slug":
-            return event.project and event.project.slug == filter_value
+            match = (event.project and event.project.slug == filter_value)
+            return match
         elif filter_type == "value__tag":
             tags_dict = dict(event.tags)
-            return filter_value in tags_dict.values()
-        logger.warning(f"Неподдерживаемый тип фильтра: {filter_type}")
+            match = (filter_value in tags_dict.values())
+            return match
+        logger.info(f"Unsupported filter: {filter_type}.")
         return False
+
+    def _evaluate_filter_group(self, event: Any, filter_group: FilterGroup, depth: int = 0) -> bool:
+        indent = "  " * depth
+
+        if "and_filters" in filter_group and isinstance(filter_group["and_filters"], list):
+            logger.info(f"{indent}  Processing AND filters:")
+            for i, sub_filter in enumerate(filter_group["and_filters"]):
+                if isinstance(sub_filter, dict) and "type" in sub_filter:  # Это простой ChannelFilter
+                    match = self._match_filter(event, sub_filter["type"], sub_filter["value"])
+                    if not match:
+                        return False
+                elif isinstance(sub_filter, dict) and ("and_filters" in sub_filter or "or_filters" in sub_filter):  # Это вложенная группа
+                    match = self._evaluate_filter_group(event, sub_filter, depth + 1)
+                    if not match:
+                        return False
+                else:
+                    logger.info(f"{indent}Incorrect filter type 'and_filters': {sub_filter}.")
+                    return False  # Считаем, что некорректный фильтр не совпадает
+            return True  # Все AND-фильтры совпали
+
+        if "or_filters" in filter_group and isinstance(filter_group["or_filters"], list):
+            logger.info(f"{indent}  Processing OR filters:")
+            for i, sub_filter in enumerate(filter_group["or_filters"]):
+                if isinstance(sub_filter, dict) and "type" in sub_filter:  # Это простой ChannelFilter
+                    match = self._match_filter(event, sub_filter["type"], sub_filter["value"])
+                    if match:
+                        return True
+                elif isinstance(sub_filter, dict) and ("and_filters" in sub_filter or "or_filters" in sub_filter):  # Это вложенная группа
+                    match = self._evaluate_filter_group(event, sub_filter, depth + 1)
+                    if match:
+                        return True
+                else:
+                    logger.info(f"{indent}Incorrect filter type 'or_filters': {sub_filter}. Skipping this filter.")
+                    # Не возвращаем False здесь, так как другие OR-фильтры могут быть True
+                    continue
+            return False  # Ни один OR-фильтр не совпал
+
+        logger.warning(f"{indent}No filters of type 'and_filters' / 'or_filters' for the group: {filter_group}. 🤔")
+        return False # Если группа не содержит ни AND, ни OR фильтров, считаем, что она не совпадает.
 
     def _get_channels_config_data(self, project) -> Tuple[List[ChannelConfig], str]:
         """Получает и парсит конфигурацию каналов из настроек проекта."""
@@ -351,38 +402,53 @@ class TelegramNotificationsPlugin(notify.NotificationPlugin):
     def _get_matching_channels(self, event: Any, channels_config: List[ChannelConfig]) -> List[ChannelConfig]:
         """
         Определяет, какие каналы соответствуют событию на основе их фильтров.
-        Возвращает список подходящих конфигураций каналов.
+        Возвращает список уникальных подходящих конфигураций каналов.
         """
-        matching_channels: List[ChannelConfig] = []
+        unique_matching_channels: Dict[str, ChannelConfig] = {}
         default_channel: Optional[ChannelConfig] = None
 
         for channel_config in channels_config:
-            filters = channel_config.get("filters", [])
-            if not filters:
-                matching_channels.append(channel_config)
+            filters = channel_config.get("filters")
+            channel_id = f"{channel_config.get('api_token')}|{channel_config.get('receivers')}"
 
-            all_filters_match = True
-            for f in filters:
-                filter_type = f.get("type")
-                filter_value = f.get("value")
-                if (
-                        not filter_type
-                        or not filter_value
-                        or not self._match_filter(event, filter_type, filter_value)
-                ):
-                    all_filters_match = False
-                    break
+            # Если фильтров нет (None, пустой список или пустой dict), это дефолтный канал.
+            if not filters or (isinstance(filters, list) and not filters) or \
+               (isinstance(filters, dict) and not (filters.get("and_filters") or filters.get("or_filters"))):
+                if default_channel is None:
+                    default_channel = channel_config
+                continue # Переходим к следующему каналу, этот - дефолтный
 
-            if all_filters_match and filters:
-                matching_channels.append(channel_config)
+            match_found = False
+            if isinstance(filters, dict) and ("and_filters" in filters or "or_filters" in filters):
+                match_found = self._evaluate_filter_group(event, filters)
+            elif isinstance(filters, list):
+                # Это старый формат списка фильтров (AND-логика)
+                all_filters_match = True
+                for f in filters:
+                    filter_type = f.get("type")
+                    filter_value = f.get("value")
+                    if (
+                            not filter_type
+                            or not filter_value
+                            or not self._match_filter(event, filter_type, filter_value)
+                    ):
+                        all_filters_match = False
+                        break
+                match_found = all_filters_match
+            else:
+                logger.warning(f"Incorrect 'filters' filters format for: {type(filters)}. Channel will be skipped.")
+                continue
+
+
+            if match_found:
+                unique_matching_channels[channel_id] = channel_config
 
         # Если не нашлось ни одного канала, соответствующего фильтрам,
         # и при этом есть дефолтный канал, используем его.
-        if not matching_channels and default_channel:
-            matching_channels.append(default_channel)
-        logger.info(f"_get_matching_channels: {matching_channels}")
-
-        return matching_channels
+        if not unique_matching_channels and default_channel:
+            default_channel_id = f"{default_channel.get('api_token')}|{default_channel.get('receivers')}"
+            unique_matching_channels[default_channel_id] = default_channel
+        return list(unique_matching_channels.values())
 
     def notify_users(self, group, event, fail_silently=False, **kwargs) -> None:
         """Отправка уведомлений."""
